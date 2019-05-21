@@ -375,7 +375,7 @@ public:
 	}
 
 	vector<spatial_node<n, T>*> _find_immediate_neighbors(spatial_node<n, T>* node) {
-		vector<spatial_node<n,T>*> neighbors;
+		set<spatial_node<n,T>*> neighbors;
 		for(size_t i=0; i<_neighbor_size_immediate; ++i) {
 			size_t d = i / 2; // dimension
 			bool sign = i % 2;
@@ -383,7 +383,7 @@ public:
 			if(!node->location_code_v[d] || (node->location_code_v[d] == _2_to_power(node->height) - 1)) continue; // if location_code is all 1's or all 0's (e.g: 111 or 1111 or 000), then it's an edge section
 			size_t neighbor_location = _construct_location_code(node->location_code_v, node->height, node->relative_heights[i], sign, d);
 			spatial_node<n, T>* neighbor = _retrieve_spatial_node(neighbor_location, node->height + node->relative_heights[i]);
-			neighbors.push_back(neighbor);
+			neighbors.insert(neighbor);
 			#if(DEBUG)
 				// printf("neighbor_location: %i\n", neighbor_location);
 			#endif
@@ -407,9 +407,18 @@ public:
 		}
 		return neighbors;
 	}
-
+	set<spatial_node<n,T>*> _find_all_neighbors(spatial_node<n,T>* node, int relative_height) {
+		set<spatial_node<n,T>*> neighbors;
+		for(size_t i=0; i<_neighbor_size_all; ++i) { // this will go up to 21 or 221 (base3), which will exclude "no change" which would have returned the current node
+			size_t neighbor_location = _construct_location_code_all_dim(node->location_code_v, node->height + relative_height, i);
+			if(neighbor_location == -1) continue; // edge section
+			spatial_node<n,T>* neighbor = _retrieve_spatial_node_can_fail(neighbor_location, node->height);
+			if(neighbor != NULL)
+				neighbors.push_back(neighbor);
+		}
+	}
 	// this function is incorrect
-	vector<spatial_node<n, T>*> _find_all_neighbors(spatial_node<n,T>* node) {
+	vector<spatial_node<n,T>*> _find_all_neighbors(spatial_node<n,T>* node) {
 		vector<spatial_node<n,T>*> neighbors;
 		/*
 		0
@@ -450,12 +459,7 @@ public:
 				corner_neighbor = _retrieve_spatial_node(neighbor_location, neighbor->height + neighbor->relative_heights[relative_height]);
 				neighbors.push_back(corner_neighbor);
 			}
-
-
-
-
 		}
-
 	}
 
 	vector<spatial_node<n, T>*> _find_non_sibling_immediate_neighbors(spatial_node<n, T>* node) {
@@ -798,6 +802,7 @@ public:
 		}
 		return _locate(p, node->sections[i]);
 	}
+
 	spatial_node<n, T>* locate(point p) {
 		spatial_node<n ,T>* section = _locate(p, root);
 		#if(DEBUG)
@@ -817,6 +822,7 @@ public:
 		#endif
 		return section;
 	}
+
 	/**
 	 * @brief  check if point is duplicate
 	 * @note   dup_dist must be smaller than section side length. Otherwise the behavior is undefined
@@ -905,7 +911,10 @@ public:
 		return sqrt((pow2(p[0] - q[0]) + pow2(p[1] - q[1])));
 	}
 	double_t _distance(point_3D p, point_3D q) {
-		return sqrt((pow2(p[0] - q[0]) + pow2(p[1] - q[1]) + pow2(p[2] - q[2])));
+		return sqrt(pow2(p[0] - q[0]) + pow2(p[1] - q[1]) + pow2(p[2] - q[2]));
+	}
+	double_t _distance_h(point_3D p, point_3D q) {
+		return sqrt(pow2(p[0] - q[0]) + pow2(p[2] - q[2]));
 	}
 	template<size_t m>
 	double_t _distance_z(array<double_t,m> p, array<double_t,m> q) {
@@ -1005,6 +1014,57 @@ public:
 			if(nocluster) printf(BOLDRED "none\n" RESET);
 		#endif
 	}
+	/**
+	 * @brief  Detect surface using focus point provided by AR world. This is specific for SSApp.
+	 *         Looks for points inside a horizontal radius: h_radius in downward direction, and returns surface when minPts is not satisfied
+	 * @param  focus_point: first result of hittest with camera's center
+	 * @param  h_radius: horizontal radius to search for nearby points
+	 * @param  v_threshold: vertical threshold to satisfy minPts
+	 * @retval closest estimated surface point
+	 */
+	double_t _detect_surface(point focus_point, double_t h_radius, double_t v_threshold, size_t minPts) {
+		// spatial_node<n,T>* node = locate(point);
+		// auto relative_height = (int)(_2_to_power(h_radius-node->height));
+		// set<spatial_node<n,T>*> neighbor_sections = _find_all_neighbors(node, relative_height);
+		// neighbor_sections.insert(node); // todo: implement filtering
+		std::priority_queue<double_t> neighbor_z;
+		// std::set<double_t,std::greater<int>> neighbor_z;
+		for(auto const& [key, node] : location_table_leaf_nodes) {
+			if(node->points.size() == 0) continue;
+			for(auto &q : node->points)
+				if(_distance_h(focus_point, q) <= h_radius && q[1] <= focus_point[1] + 0.03) // filter points close enough and are below focus_point or same level
+					neighbor_z.push(q[1]);
+		}
+		
+		
+		double_t surface = -1000;
+		vector<double_t> nz;
+		while(!neighbor_z.empty()) {
+			nz.push_back(neighbor_z.top());
+			neighbor_z.pop();
+		}
+		REP(nz.size()) {
+			surface = nz[i];
+			REPJ(minPts) {
+				double_t next = nz[i+j];
+				if(surface - next > v_threshold) return surface;
+			}
+		}
+
+		// auto it = neighbor_z.begin();
+		// cout << "neighbor_z size: " << neighbor_z.size() << endl;
+		// if(neighbor_z.size() < minPts) return surface;
+		// for(int i=0; i<neighbor_z.size()-minPts; ++i) {
+		// 	auto jt = it;
+		// 	surface = *it++;
+		// 	for(int j=0; j < minPts; ++j) {
+		// 		double_t next = *jt++;
+		// 		// printf("surface: %.2f, next: %.2f, vthres: %.2f\n", surface, next, v_threshold);
+		// 		if(surface - next > v_threshold) return surface;
+		// 	}
+		// }
+		return surface;
+	}
 	void boxScan(double_t eps, size_t minPts, array<double_t,3> cam_pos) {
 		#if(DEBUG)
 		size_t iterations;
@@ -1070,8 +1130,6 @@ public:
 				}
 			}
 		}
-		
-
 		#if(TEST)
 			map<size_t, size_t> clusters;
 			for(auto const& [key, node] : location_table_leaf_nodes) {
@@ -1099,8 +1157,8 @@ public:
 		// iterate all points
 		for(auto const& [key, node] : location_table_leaf_nodes) {
 			if(node->points.size() == 0) continue;
-			vector<spatial_node<n,T>*> neighbor_sections = _find_all_same_level_neighbors(node);
-			neighbor_sections.push_back(node); // include points in current section
+			set<spatial_node<n,T>*> neighbor_sections = _find_all_same_level_neighbors(node);
+			neighbor_sections.insert(node); // include points in current section
 			for(auto &p : node->points) {
 				if(p[label] == eliminated || p[label] != fresh) continue; // <= cluster_id_seed: if smaller than this number, then it's a previously detected cluster. expand on that
 				vector<pair<spatial_node<n,T>*, point*>> neighbor_points;
@@ -1181,8 +1239,8 @@ public:
 		// iterate all points
 		for(auto const& [key, node] : location_table_leaf_nodes) {
 			if(node->points.size() == 0) continue;
-			vector<spatial_node<n,T>*> neighbor_sections = _find_all_same_level_neighbors(node);
-			neighbor_sections.push_back(node); // include points in current section
+			set<spatial_node<n,T>*> neighbor_sections = _find_all_same_level_neighbors(node);
+			neighbor_sections.insert(node); // include points in current section
 			for(auto &p : node->points) {
 				if(p[label] != fresh || p[label] == eliminated) continue;
 				vector<pair<spatial_node<n,T>*, point*>> neighbor_points;
@@ -1205,8 +1263,8 @@ public:
 						}
 						if((*p.second)[label] != fresh) continue; // skip if already processed and added to another cluster
 						(*p.second)[label] = c;
-						vector<spatial_node<n,T>*> p_neighbor_sections = _find_all_same_level_neighbors(p.first);
-						p_neighbor_sections.push_back(p.first); // include points in current section
+						set<spatial_node<n,T>*> p_neighbor_sections = _find_all_same_level_neighbors(p.first);
+						p_neighbor_sections.insert(p.first); // include points in current section
 						vector<pair<spatial_node<n,T>*, point*>> p_neighbor_points;
 						for(auto &section : p_neighbor_sections) {
 							for(auto &q : section->points) {
@@ -1551,7 +1609,7 @@ int main(int argc, char** argv)
 	}
 	if(0) {
 		printf("mod: %f\n", std::fmod(160.1, 5.0));
-
+		
 		return 0;
 	}
 	if(0) {
@@ -1624,9 +1682,9 @@ int main(int argc, char** argv)
 		for(size_t i=0; i<2; ++i) {
 			location_code <<= height;
 			if(relative_height < 0)
-				location_code += location_code_v[i] >> -relative_height;
+			location_code += location_code_v[i] >> -relative_height;
 			else
-				location_code += location_code_v[i];
+			location_code += location_code_v[i];
 		}
 		printf("location_code:%i\n", location_code);
 		return 0;
@@ -1649,14 +1707,14 @@ int main(int argc, char** argv)
 		for(int i=0; i<n; ++i) {
 			printf("{%i,%i},\n", rand() % sl - sl/2,rand() % sl - sl/2);
 		}
-
+		
 		return 0;
 	}
 	if(0){
 		SpatialTree<3, double> space(10);
 		space.capacity = 1;
 		#if(DEBUG_VISUALIZE)
-			// test(space);
+		// test(space);
 		#endif
 		printf("\n%p\n", space.locate({-2,1,4}));
 		return 0;
@@ -1667,31 +1725,31 @@ int main(int argc, char** argv)
 		using boost::property_tree::ptree;
 		using boost::property_tree::read_json;
 		using boost::property_tree::write_json;
-
+		
 		ptree pt;
 		read_json("points.json", pt);
 		auto points = pt.get<string> ("points");
 		
 		printf("points: %s\n", points.c_str());
 		// for(const auto& x: points) {
-		// 	std::cout << x.first << ": " << x.second.get_value<std::string>() << std::endl;
-		// 	printf("lel");
+			// 	std::cout << x.first << ": " << x.second.get_value<std::string>() << std::endl;
+			// 	printf("lel");
 		// }
 		return 0;
 	}
 	if(1) {
-			using json = nlohmann::json;
-
-			auto space_col = (space_store*)create_3D_space_and_projection(40, 0.03, true);
-			auto space = (SpatialTree<3, double_t>*)(space_col->space);
-			auto projection = (SpatialTree<2, double_t>*)(space_col->projection);
-			auto filename = "points.json";
-			std::ifstream i(filename);
-			json j;
-			i >> j;
-			// cout << j["points"] << '\n';
-			std::printf("read %i points from %s\n", j["points"].size(), filename);
-			// for (json::iterator it = j.begin(); it != j.end(); ++it) {
+		using json = nlohmann::json;
+		
+		auto space_col = (space_store*)create_3D_space_and_projection(40, 0.03, true);
+		auto space = (SpatialTree<3, double_t>*)(space_col->space);
+		auto projection = (SpatialTree<2, double_t>*)(space_col->projection);
+		auto filename = "points.json";
+		std::ifstream i(filename);
+		json j;
+		i >> j;
+		// cout << j["points"] << '\n';
+		std::printf("read %i points from %s\n", j["points"].size(), filename);
+		// for (json::iterator it = j.begin(); it != j.end(); ++it) {
 			// 	std::cout << *it << '\n';
 			// }
 			auto points = j["points"];
@@ -1706,19 +1764,19 @@ int main(int argc, char** argv)
 			}
 			
 			query_api1(0.04, 20, 0, space_col);
-
+			
 			vector<point_2D> pts_new;
 			projection->get_points(pts_new);
 			
-
+			
 			j["points"] = pts_new;
 			std::ofstream o("points_annotated.json");
 			o << j << std::endl;
 			return 0;
 		}
-	#endif
-	if(0) {
-		#if(DEBUG_VISUALIZE_3D)
+		#endif
+		if(0) {
+			#if(DEBUG_VISUALIZE_3D)
 			std::vector<std::vector<double>> x, y, z;
 			for (double i = -5; i <= 5;  i += 0.25) {
 				std::vector<double> x_row, y_row, z_row;
@@ -2154,6 +2212,14 @@ void pass_2d_array(const double_t** arr, size_t c1, size_t c2) {
 		return res;
 	}
 	
+	double_t detect_surface_3D(void* s, const double* fp, double_t h_radius, double_t v_threshold, size_t minPts) {
+		point_3D focus_point;
+		std::copy(fp, fp+3, focus_point.begin());
+		SpatialTree<3, double_t>* space = (SpatialTree<3, double_t>*)s;
+		return space->_detect_surface(focus_point, h_radius, v_threshold, minPts);
+	}
+
+
 // }
 #if(TEST)
 	void print_contents( const boost::property_tree::ptree& pt)

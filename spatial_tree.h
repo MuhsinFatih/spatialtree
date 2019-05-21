@@ -107,3 +107,10 @@ struct c_array_double* insert_and_return_bulk(const double_t* c_flat_array, size
 struct c_box_array query_api1(double_t eps, size_t minPts, const double_t* cam_pos, void* space_col);
 struct c_array_double* get_all_points_api1(void* space_col, bool print);
 /* **************** END API1 **************** */
+
+
+/* ****************** API2 ****************** */
+
+double_t detect_surface_3D(void* space, const double* focus_point, double_t h_radius, double_t v_threshold, size_t minPts);
+
+/* **************** END API2 **************** */
