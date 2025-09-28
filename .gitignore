@@ -78,3 +78,34 @@ CTestTestfile.cmake
 .history
 
 # End of https://www.gitignore.io/api/visualstudiocode
+
+# Build artifacts
+artifacts/
+*.out
+*.o
+*.a
+*.so
+*.dylib
+*.exe
+
+# Temporary files
+*.tmp
+*.temp
+tempCodeRunnerFile.*
+coderunner
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.ipynb_checkpoints/
+
+# Blender backup files
+*.blend1
+*.blend2
+
+# IDE specific
+.idea/
+*.swp
+*.swo
+*~
